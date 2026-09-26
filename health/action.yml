@@ -1,0 +1,14 @@
+name: Runner health
+description: Report disk, memory, and cache sizes on the self-hosted Mac
+inputs:
+  min-free-gb:
+    description: Emit a warning when free disk space (GB) drops below this
+    required: false
+    default: "30"
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        RUNNER_HEALTH_MIN_FREE_GB: ${{ inputs.min-free-gb }}
+      run: bash "${{ github.action_path }}/health.sh"
