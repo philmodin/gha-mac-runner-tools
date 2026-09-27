@@ -6,6 +6,12 @@
 # or run by hand / from launchd. Tools that aren't installed are skipped.
 # Always exits 0 so it never fails a job; staleness is reported as warnings.
 #
+# Status, by days between installed and newest release when both dates are known,
+# else by semver:  current  same version
+#                  recent   <=30 days, or patch behind
+#                  stale    >30 days, or minor behind
+#                  outdated >180 days, or major behind
+#
 # Latest versions come from public, unauthenticated sources:
 #   macOS, Xcode   Apple Developer releases RSS
 #   claude         npm registry (@anthropic-ai/claude-code)
@@ -15,13 +21,14 @@
 #
 # Environment overrides:
 #   RUNNER_VERSIONS_WARN        when to emit ::warning:: lines:
-#                               major (default) | any | none
+#                               outdated (default) | stale | none
 #   RUNNER_VERSIONS_SKIP        space-separated tool names to skip, e.g. "node gh"
 #   RUNNER_VERSIONS_RUNNER_DIR  actions runner install dir (default: derived
 #                               from RUNNER_WORKSPACE, else ~/actions-runner)
 #   RUNNER_VERSIONS_TIMEOUT     per-request timeout in seconds (default 10)
 
-WARN_ON="${RUNNER_VERSIONS_WARN:-major}"
+WARN_ON="${RUNNER_VERSIONS_WARN:-outdated}"
+case "$WARN_ON" in major) WARN_ON=outdated ;; any) WARN_ON=stale ;; esac
 SKIP=" ${RUNNER_VERSIONS_SKIP:-} "
 TIMEOUT="${RUNNER_VERSIONS_TIMEOUT:-10}"
 
@@ -82,19 +89,6 @@ days_between() {
   echo $(((b - a + 43200) / 86400))
 }
 
-# 5 → "5 days", 143 → "143 days (~4 mo)", 450 → "450 days (~1.2 yr)"
-fmt_days() {
-  local n=$1 t
-  if ((n < 60)); then
-    echo "$n day$([ "$n" = 1 ] || echo s)"
-  elif ((n < 365)); then
-    echo "$n days (~$((n / 30)) mo)"
-  else
-    t=$((n * 10 / 365))
-    echo "$n days (~$((t / 10)).$((t % 10)) yr)"
-  fi
-}
-
 # Compare dotted versions: prints -1, 0, or 1.
 ver_cmp() {
   local -a a b
@@ -145,32 +139,43 @@ row() { echo "$1" >>"$TASK.row"; }
 # report NAME INSTALLED LATEST [NOTE [DATE_CMD...]]
 # DATE_CMD, run with a version appended, prints its release date; used only when behind.
 report() {
-  local name=$1 have=$2 latest=$3 note=$4 status icon days= age=
+  local name=$1 have=$2 latest=$3 note=$4 status icon days= age= minor
+  local floor=${floor:-}
   shift $(($# < 4 ? $# : 4))
-  if [ -z "$have" ]; then
-    return
-  elif [ -z "$latest" ]; then
+  [ -z "$have" ] && return
+  if [ -z "$latest" ]; then
     status="unknown"; icon="❔"
   elif [ "$(ver_cmp "$have" "$latest")" -ge 0 ]; then
     status="current"; icon="✅"
-  elif [ "${have%%.*}" != "${latest%%.*}" ]; then
-    status="major behind"; icon="❌"
   else
-    status="behind"; icon="⚠️"
+    [ $# -gt 0 ] && days=$(days_between "$("$@" "$have")" "$("$@" "$latest")")
+    age=${days:+$days day$([ "$days" = 1 ] || echo s)}
+    minor=$(cut -d. -f1-2 <<<"$have.0")
+    if [ -n "$days" ]; then
+      if ((days > 180)); then status="outdated"; elif ((days > 30)); then status="stale"; else status="recent"; fi
+    elif [ "${have%%.*}" != "${latest%%.*}" ]; then
+      status="outdated"
+    elif [ "$minor" != "$(cut -d. -f1-2 <<<"$latest.0")" ]; then
+      status="stale"
+    else
+      status="recent"
+    fi
+    case $status in outdated) icon="❌" ;; stale) icon="⚠️" ;; *) icon="✅" ;; esac
   fi
-
-  if [[ "$status" = *behind ]] && [ $# -gt 0 ]; then
-    days=$(days_between "$("$@" "$have")" "$("$@" "$latest")")
-    age=${days:+$(fmt_days "$days")}
+  # floor is set by apple_report when a newer major exists.
+  if [ "$floor" = stale ] && [[ "$status" = current || "$status" = recent ]]; then
+    status="stale"; icon="⚠️"
+  elif [ "$floor" = recent ] && [ "$status" = current ]; then
+    status="recent"
   fi
 
   echo "  $(printf '%-14s %-14s latest %-14s %s' "$name" "$have" "${latest:-?}" "$status${age:+ $age}")${note:+ ($note)}"
   row "| $name | $have | ${latest:-?} | $age | $icon $status${note:+ · $note} |"
   echo "$status" >>"$TASK.status"
 
-  if { [ "$status" = "major behind" ] && [ "$WARN_ON" != none ]; } ||
-     { [ "$status" = "behind" ] && [ "$WARN_ON" = any ]; }; then
-    echo "::warning::$name is $status: $have installed, $latest available${days:+, released $days days later}"
+  if { [ "$status" = outdated ] && [ "$WARN_ON" != none ]; } ||
+     { [ "$status" = stale ] && [ "$WARN_ON" = stale ]; }; then
+    echo "::warning::$name is $status: $have installed, $latest available${age:+, released $age later}${note:+ ($note)}"
   fi
 }
 
@@ -192,14 +197,19 @@ check() {
 }
 
 # apple_report NAME INSTALLED [NOTE] — compares with the newest release on the
-# installed major, since major upgrades are often held back on purpose.
+# installed major, since major upgrades are often held back on purpose. A newer
+# major caps status at recent, or at stale once its first listed release is >180 days old.
 apple_report() {
-  local releases newest same note=$3
+  local releases newest same first days note=$3 floor=
   releases=$(apple_releases "$1")
   newest=$(max_version <<<"$releases")
   same=$(grep -E "^${2%%.*}(\.|$)" <<<"$releases" | max_version)
   if [ -n "$newest" ] && [ "${newest%%.*}" != "${2%%.*}" ]; then
-    note="$newest available${note:+; $note}"
+    first=$(grep -E "^${newest%%.*}(\.|$)" <<<"$releases" | sort -t. -k1,1n -k2,2n -k3,3n | head -1)
+    days=$(days_between "$(apple_date "$1" "$first")" "$(date -u +%Y-%m-%d)")
+    floor=recent
+    ((${days:-0} > 180)) && floor=stale
+    note="$newest available${days:+ for $days days}${note:+; $note}"
   fi
   report "$1" "$2" "$same" "$note" apple_date "$1"
 }
@@ -283,12 +293,12 @@ task check pod         "pod --version"           CocoaPods/CocoaPods
 task check fastlane    "fastlane --version | grep -E '^fastlane [0-9]'" fastlane/fastlane
 wait
 
-BEHIND=$(cat "$TMP"/*.status 2>/dev/null | grep -c behind)
-MAJOR_BEHIND=$(cat "$TMP"/*.status 2>/dev/null | grep -c 'major behind')
+STALE=$(cat "$TMP"/*.status 2>/dev/null | grep -cE '^(stale|outdated)$')
+OUTDATED=$(cat "$TMP"/*.status 2>/dev/null | grep -cx outdated)
 
 echo "Runner versions:"
 cat "$TMP"/*.log 2>/dev/null
-echo "Runner versions: $BEHIND behind ($MAJOR_BEHIND major)"
+echo "Runner versions: $STALE stale ($OUTDATED outdated)"
 
 if [ -n "$GITHUB_STEP_SUMMARY" ]; then
   {
@@ -301,8 +311,8 @@ fi
 
 if [ -n "$GITHUB_OUTPUT" ]; then
   {
-    echo "behind=$BEHIND"
-    echo "major-behind=$MAJOR_BEHIND"
+    echo "stale=$STALE"
+    echo "outdated=$OUTDATED"
   } >> "$GITHUB_OUTPUT" 2>/dev/null
 fi
 

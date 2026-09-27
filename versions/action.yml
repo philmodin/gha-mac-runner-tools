@@ -2,20 +2,20 @@ name: Runner versions
 description: Report macOS, Xcode, and dev tool versions on the self-hosted Mac and how stale they are
 inputs:
   warn:
-    description: "When to emit warnings: major (default), any, or none"
+    description: "When to emit warnings: outdated (default), stale, or none"
     required: false
-    default: major
+    default: outdated
   skip:
     description: Space-separated tool names to skip, e.g. "node gh"
     required: false
     default: ""
 outputs:
-  behind:
-    description: Number of tools behind their newest release
-    value: ${{ steps.versions.outputs.behind }}
-  major-behind:
-    description: Number of tools a major version behind
-    value: ${{ steps.versions.outputs.major-behind }}
+  stale:
+    description: Number of tools stale or outdated (>30 days or a minor version behind)
+    value: ${{ steps.versions.outputs.stale }}
+  outdated:
+    description: Number of tools outdated (>180 days or a major version behind)
+    value: ${{ steps.versions.outputs.outdated }}
 runs:
   using: composite
   steps:
