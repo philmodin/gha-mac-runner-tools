@@ -1,4 +1,4 @@
-# gha-mac-runner-tools
+# mac-runner-kit
 
 Two small tools for self-hosted GitHub Actions runners on macOS: report runner health after jobs, and track how stale the Mac's software is.
 
@@ -27,7 +27,7 @@ Versions, as a run summary table:
 Health report at the end of a job:
 
 ```yaml
-- uses: philmodin/gha-mac-runner-tools/health@main
+- uses: philmodin/mac-runner-kit/health@main
   if: always()
 ```
 
@@ -41,7 +41,7 @@ jobs:
   versions:
     runs-on: [self-hosted, macOS]
     steps:
-      - uses: philmodin/gha-mac-runner-tools/versions@main
+      - uses: philmodin/mac-runner-kit/versions@main
 ```
 
 `@main` tracks the latest changes. Pin a commit SHA if you want updates only when you choose.
@@ -73,7 +73,7 @@ Runner health: disk 195GB free | mem 83% free | swap 0.00M | _work 14G | Derived
 ### Use as an action (recommended)
 
 ```yaml
-- uses: philmodin/gha-mac-runner-tools/health@main
+- uses: philmodin/mac-runner-kit/health@main
   if: always()
   with:
     min-free-gb: 30   # optional, default 30
@@ -89,7 +89,7 @@ Alternative when you want a report after every job without editing workflows. Ou
 
    ```sh
    mkdir -p ~/bin
-   curl -fsSL https://raw.githubusercontent.com/philmodin/gha-mac-runner-tools/main/health/health.sh -o ~/bin/runner-health.sh
+   curl -fsSL https://raw.githubusercontent.com/philmodin/mac-runner-kit/main/health/health.sh -o ~/bin/runner-health.sh
    chmod +x ~/bin/runner-health.sh
    ```
 
@@ -185,7 +185,7 @@ jobs:
     runs-on: [self-hosted, macOS, "${{ matrix.runner }}"]
     steps:
       - id: versions
-        uses: philmodin/gha-mac-runner-tools/versions@main
+        uses: philmodin/mac-runner-kit/versions@main
         with:
           warn: outdated   # outdated (default) | stale | none
           skip: ""      # e.g. "node fastlane"
@@ -206,7 +206,7 @@ Set `issue: true` to keep one open issue per runner in the calling repo. When an
     permissions:
       issues: write
     steps:
-      - uses: philmodin/gha-mac-runner-tools/versions@main
+      - uses: philmodin/mac-runner-kit/versions@main
         with:
           issue: true
 ```
