@@ -1,4 +1,4 @@
-# gha-mac-runner-tools
+# mac-runner-kit
 
 Two small tools for self-hosted GitHub Actions runners on macOS: report runner health after jobs, and track how stale the Mac's software is.
 
@@ -27,7 +27,7 @@ Versions, as a run summary table:
 Health report at the end of a job:
 
 ```yaml
-- uses: philmodin/gha-mac-runner-tools/health@main
+- uses: philmodin/mac-runner-kit/health@main
   if: always()
 ```
 
@@ -41,7 +41,7 @@ jobs:
   versions:
     runs-on: [self-hosted, macOS]
     steps:
-      - uses: philmodin/gha-mac-runner-tools/versions@main
+      - uses: philmodin/mac-runner-kit/versions@main
 ```
 
 `@main` tracks the latest changes. Pin a commit SHA if you want updates only when you choose.
@@ -73,7 +73,7 @@ Runner health: disk 195GB free | mem 83% free | swap 0.00M | _work 14G | Derived
 ### Use as an action (recommended)
 
 ```yaml
-- uses: philmodin/gha-mac-runner-tools/health@main
+- uses: philmodin/mac-runner-kit/health@main
   if: always()
   with:
     min-free-gb: 30   # optional, default 30
@@ -89,7 +89,7 @@ Alternative when you want a report after every job without editing workflows. Ou
 
    ```sh
    mkdir -p ~/bin
-   curl -fsSL https://raw.githubusercontent.com/philmodin/gha-mac-runner-tools/main/health/health.sh -o ~/bin/runner-health.sh
+   curl -fsSL https://raw.githubusercontent.com/philmodin/mac-runner-kit/main/health/health.sh -o ~/bin/runner-health.sh
    chmod +x ~/bin/runner-health.sh
    ```
 
@@ -185,7 +185,7 @@ jobs:
     runs-on: [self-hosted, macOS, "${{ matrix.runner }}"]
     steps:
       - id: versions
-        uses: philmodin/gha-mac-runner-tools/versions@main
+        uses: philmodin/mac-runner-kit/versions@main
         with:
           warn: outdated   # outdated (default) | stale | none
           skip: ""      # e.g. "node fastlane"
@@ -198,6 +198,19 @@ Each machine gets its own table in the run summary. To make staleness harder to 
         run: exit 1
 ```
 
+### Tracking issue
+
+Set `issue: true` to keep one open issue per runner in the calling repo. When any warning fires, the action finds an open issue titled `mac-runner-kit outdated versions · <runner name>` and replaces its body with the latest table, or creates it. When a later run has no warnings, it closes the issue with a comment. It uses `gh` on the runner and the job's `GITHUB_TOKEN`, so grant the permission:
+
+```yaml
+    permissions:
+      issues: write
+    steps:
+      - uses: philmodin/mac-runner-kit/versions@main
+        with:
+          issue: true
+```
+
 To run it by hand on any Mac: `bash versions/versions.sh`.
 
 ### Inputs and outputs
@@ -206,6 +219,9 @@ To run it by hand on any Mac: `bash versions/versions.sh`.
 |---|---|---|---|
 | `warn` | `RUNNER_VERSIONS_WARN` | `outdated` | Emit `::warning::` for `outdated` tools, `stale` or worse, or `none` |
 | `skip` | `RUNNER_VERSIONS_SKIP` | empty | Space-separated tool names to skip (see below) |
+| `issue` | | `false` | Open, update, or close a tracking issue (see above) |
+| `issue-title` | | `mac-runner-kit outdated versions · <runner>` | Issue title to match and create |
+| `token` | | `github.token` | Token for the issue; needs `issues: write` |
 | | `RUNNER_VERSIONS_RUNNER_DIR` | derived from `RUNNER_WORKSPACE`, else `~/actions-runner` | Actions runner install dir |
 | | `RUNNER_VERSIONS_TIMEOUT` | `10` | Per-request timeout in seconds |
 
@@ -215,6 +231,7 @@ Skip names: `macos xcode brew claude tailscale cloudflared gh docker colima runn
 |---|---|
 | `stale` | Number of tools stale or outdated |
 | `outdated` | Number of tools outdated |
+| `warned` | Number of `::warning::` lines emitted, which drives the issue |
 
 ### Where versions come from
 
