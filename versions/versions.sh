@@ -26,6 +26,8 @@
 #   RUNNER_VERSIONS_RUNNER_DIR  actions runner install dir (default: derived
 #                               from RUNNER_WORKSPACE, else ~/actions-runner)
 #   RUNNER_VERSIONS_TIMEOUT     per-request timeout in seconds (default 10)
+#   RUNNER_VERSIONS_REPORT      file to write the markdown table to, and a
+#                               "warned=N" line to $GITHUB_OUTPUT (used by issue.sh)
 
 WARN_ON="${RUNNER_VERSIONS_WARN:-outdated}"
 case "$WARN_ON" in major) WARN_ON=outdated ;; any) WARN_ON=stale ;; esac
@@ -175,6 +177,7 @@ report() {
 
   if { [ "$status" = outdated ] && [ "$WARN_ON" != none ]; } ||
      { [ "$status" = stale ] && [ "$WARN_ON" = stale ]; }; then
+    echo warned >>"$TASK.status"
     echo "::warning::$name is $status: $have installed, $latest available${age:+, released $age later}${note:+ ($note)}"
   fi
 }
@@ -295,24 +298,28 @@ wait
 
 STALE=$(cat "$TMP"/*.status 2>/dev/null | grep -cE '^(stale|outdated)$')
 OUTDATED=$(cat "$TMP"/*.status 2>/dev/null | grep -cx outdated)
+WARNED=$(cat "$TMP"/*.status 2>/dev/null | grep -cx warned)
 
 echo "Runner versions:"
 cat "$TMP"/*.log 2>/dev/null
 echo "Runner versions: $STALE stale ($OUTDATED outdated)"
 
+table() {
+  echo "| Tool | Installed | Latest | Behind by | Status |"
+  echo "|---|---|---|---|---|"
+  cat "$TMP"/*.row 2>/dev/null
+}
+
 if [ -n "$GITHUB_STEP_SUMMARY" ]; then
-  {
-    echo "### Runner versions${RUNNER_NAME:+ · $RUNNER_NAME}"
-    echo "| Tool | Installed | Latest | Behind by | Status |"
-    echo "|---|---|---|---|---|"
-    cat "$TMP"/*.row 2>/dev/null
-  } >> "$GITHUB_STEP_SUMMARY" 2>/dev/null
+  { echo "### Runner versions${RUNNER_NAME:+ · $RUNNER_NAME}"; table; } >> "$GITHUB_STEP_SUMMARY" 2>/dev/null
 fi
+[ -n "$RUNNER_VERSIONS_REPORT" ] && table > "$RUNNER_VERSIONS_REPORT" 2>/dev/null
 
 if [ -n "$GITHUB_OUTPUT" ]; then
   {
     echo "stale=$STALE"
     echo "outdated=$OUTDATED"
+    echo "warned=$WARNED"
   } >> "$GITHUB_OUTPUT" 2>/dev/null
 fi
 

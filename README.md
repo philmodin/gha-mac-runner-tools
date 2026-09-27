@@ -198,6 +198,19 @@ Each machine gets its own table in the run summary. To make staleness harder to 
         run: exit 1
 ```
 
+### Tracking issue
+
+Set `issue: true` to keep one open issue per runner in the calling repo. When any warning fires, the action finds an open issue titled `mac-runner-kit outdated versions · <runner name>` and replaces its body with the latest table, or creates it. When a later run has no warnings, it closes the issue with a comment. It uses `gh` on the runner and the job's `GITHUB_TOKEN`, so grant the permission:
+
+```yaml
+    permissions:
+      issues: write
+    steps:
+      - uses: philmodin/gha-mac-runner-tools/versions@main
+        with:
+          issue: true
+```
+
 To run it by hand on any Mac: `bash versions/versions.sh`.
 
 ### Inputs and outputs
@@ -206,6 +219,9 @@ To run it by hand on any Mac: `bash versions/versions.sh`.
 |---|---|---|---|
 | `warn` | `RUNNER_VERSIONS_WARN` | `outdated` | Emit `::warning::` for `outdated` tools, `stale` or worse, or `none` |
 | `skip` | `RUNNER_VERSIONS_SKIP` | empty | Space-separated tool names to skip (see below) |
+| `issue` | | `false` | Open, update, or close a tracking issue (see above) |
+| `issue-title` | | `mac-runner-kit outdated versions · <runner>` | Issue title to match and create |
+| `token` | | `github.token` | Token for the issue; needs `issues: write` |
 | | `RUNNER_VERSIONS_RUNNER_DIR` | derived from `RUNNER_WORKSPACE`, else `~/actions-runner` | Actions runner install dir |
 | | `RUNNER_VERSIONS_TIMEOUT` | `10` | Per-request timeout in seconds |
 
@@ -215,6 +231,7 @@ Skip names: `macos xcode brew claude tailscale cloudflared gh docker colima runn
 |---|---|
 | `stale` | Number of tools stale or outdated |
 | `outdated` | Number of tools outdated |
+| `warned` | Number of `::warning::` lines emitted, which drives the issue |
 
 ### Where versions come from
 

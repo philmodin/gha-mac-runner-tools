@@ -9,6 +9,18 @@ inputs:
     description: Space-separated tool names to skip, e.g. "node gh"
     required: false
     default: ""
+  issue:
+    description: "Open or update an issue in the calling repo when warnings fire, and close it when clean: true or false. Needs issues: write"
+    required: false
+    default: "false"
+  issue-title:
+    description: Issue title to match and create
+    required: false
+    default: ""
+  token:
+    description: Token used for the issue
+    required: false
+    default: ${{ github.token }}
 outputs:
   stale:
     description: Number of tools stale or outdated (>30 days or a minor version behind)
@@ -24,4 +36,13 @@ runs:
       env:
         RUNNER_VERSIONS_WARN: ${{ inputs.warn }}
         RUNNER_VERSIONS_SKIP: ${{ inputs.skip }}
+        RUNNER_VERSIONS_REPORT: ${{ runner.temp }}/runner-versions.md
       run: bash "${{ github.action_path }}/versions.sh"
+    - if: inputs.issue == 'true'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        WARNED: ${{ steps.versions.outputs.warned }}
+        REPORT: ${{ runner.temp }}/runner-versions.md
+        ISSUE_TITLE: ${{ inputs.issue-title }}
+      run: bash "${{ github.action_path }}/issue.sh"
