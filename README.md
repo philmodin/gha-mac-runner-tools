@@ -7,6 +7,21 @@ Two small tools for self-hosted GitHub Actions runners on macOS: report runner h
 
 Both are plain bash scripts that need only macOS and `curl`. They are read-only and always exit 0, so they never fail a job unless you add a step that does.
 
+## Examples
+
+Health, in the job log after each job:
+
+```
+Runner health: disk 195GB free | mem 83% free | swap 0.00M | _work 14G | DerivedData 1.9G
+```
+
+Versions, as a run summary table:
+
+> | Tool | Installed | Latest | Behind by | Status |
+> |---|---|---|---|---|
+> | Xcode | 26.6 | 26.6 |  | ✅ current · 27 available |
+> | gh | 2.92.0 | 2.101.0 | 140 days (~4 mo) | ⚠️ behind |
+
 ## Quick start
 
 Health report at the end of a job:
@@ -55,18 +70,20 @@ Runner health: disk 195GB free | mem 83% free | swap 0.00M | _work 14G | Derived
 
 </details>
 
-### Hook or action?
+### Use as an action (recommended)
 
-|  | Job hook | Composite action |
-|---|---|---|
-| Runs | After every job on the runner | Only in workflows that add the step |
-| Workflow changes | None | One step per workflow |
-| Output | Job log under "Complete runner"; step summary may not render | Job log and step summary table |
-| Setup | Install the script on each Mac and restart the runner | Add the step |
+```yaml
+- uses: philmodin/gha-mac-runner-tools/health@main
+  if: always()
+  with:
+    min-free-gb: 30   # optional, default 30
+```
 
-The two work well together: the hook covers every job, and the action adds a summary table where you want one.
+Adds a job log line and a step summary table. No setup on the Mac.
 
 ### Install as a job hook
+
+Alternative when you want a report after every job without editing workflows. Output goes to the job log under "Complete runner"; the step summary may not render. Use the hook or the action, not both, or each job reports twice.
 
 1. Copy the script somewhere the runner account owns and make it executable:
 
@@ -76,8 +93,6 @@ The two work well together: the hook covers every job, and the action adds a sum
    chmod +x ~/bin/runner-health.sh
    ```
 
-   If this repo is private, copy `health/health.sh` from a local clone instead.
-
 2. Add this line to the `.env` file in the runner's install directory. The path must be absolute:
 
    ```
@@ -85,15 +100,6 @@ The two work well together: the hook covers every job, and the action adds a sum
    ```
 
 3. Restart the runner (`./svc.sh stop && ./svc.sh start`, or however you launch it).
-
-### Use as an action
-
-```yaml
-- uses: philmodin/gha-mac-runner-tools/health@main
-  if: always()
-  with:
-    min-free-gb: 30   # optional, default 30
-```
 
 ### Configuration
 
@@ -226,10 +232,6 @@ Skip names: `macos xcode brew claude tailscale cloudflared gh docker colima runn
 | xcodes, swiftlint, swiftformat, tuist, pod, fastlane | their version commands | GitHub releases |
 
 Release dates come from the same sources, plus each tag's GitHub release page. They are looked up only for tools that are behind.
-
-## Private repo usage
-
-If this repo is private, allow other repos to use its actions under Settings → Actions → General → Access. For the health hook, copy the script from a local clone instead of using `curl`.
 
 ## Adding a tool to versions.sh
 
