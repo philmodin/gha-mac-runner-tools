@@ -73,16 +73,27 @@ max_version() {
 }
 
 # Final (non-beta, non-RC) releases in Apple's feed, e.g. "macOS 26.6.2 (25G83)"
-# or "Xcode 27 (27A266a)". Reads APPLE_RSS, fetched once below.
+# or "Xcode 27 (27A266a)". Reads APPLE_RSS, fetched in check_apple.
 apple_releases() {
   printf '%s\n' "$APPLE_RSS" \
     | grep -oE "<title>$1 ([A-Za-z]+ )?[0-9]+(\.[0-9]+)* \([0-9A-Za-z]+\)</title>" \
     | sed -E 's/^<title>[^0-9]*([0-9.]+).*/\1/'
 }
 
-ROWS=()
-BEHIND=0
-MAJOR_BEHIND=0
+# Each check runs as a background task writing to $TASK.log/.row/.status;
+# results are collected in task order once all finish.
+TMP=$(mktemp -d) || exit 0
+trap 'rm -rf "$TMP"' EXIT
+N=0
+
+task() {
+  N=$((N + 1))
+  local id
+  id=$(printf '%02d' "$N")
+  (TASK="$TMP/$id"; "$@") >"$TMP/$id.log" 2>/dev/null &
+}
+
+row() { echo "$1" >>"$TASK.row"; }
 
 # report NAME INSTALLED LATEST [NOTE]
 report() {
@@ -95,14 +106,13 @@ report() {
     status="current"; icon="✅"
   elif [ "${have%%.*}" != "${latest%%.*}" ]; then
     status="major behind"; icon="❌"
-    BEHIND=$((BEHIND + 1)); MAJOR_BEHIND=$((MAJOR_BEHIND + 1))
   else
     status="behind"; icon="⚠️"
-    BEHIND=$((BEHIND + 1))
   fi
 
   echo "  $(printf '%-14s %-14s latest %-14s %s' "$name" "$have" "${latest:-?}" "$status")${note:+ ($note)}"
-  ROWS+=("| $name | $have | ${latest:-?} | $icon $status${note:+ · $note} |")
+  row "| $name | $have | ${latest:-?} | $icon $status${note:+ · $note} |"
+  echo "$status" >>"$TASK.status"
 
   if { [ "$status" = "major behind" ] && [ "$WARN_ON" != none ]; } ||
      { [ "$status" = "behind" ] && [ "$WARN_ON" = any ]; }; then
@@ -119,12 +129,6 @@ check() {
   report "$1" "$(eval "$2" 2>/dev/null | first_version)" "$(github_latest "$3")"
 }
 
-echo "Runner versions:"
-
-if want macos || want xcode; then
-  APPLE_RSS=$(fetch https://developer.apple.com/news/releases/rss/releases.rss)
-fi
-
 # apple_report NAME INSTALLED [NOTE] — compares with the newest release on the
 # installed major, since major upgrades are often held back on purpose.
 apple_report() {
@@ -138,48 +142,56 @@ apple_report() {
   report "$1" "$2" "$same" "$note"
 }
 
-if want macos && has sw_vers; then
-  apple_report macOS "$(sw_vers -productVersion)"
-fi
+check_apple() {
+  want macos || want xcode || return
+  APPLE_RSS=$(fetch https://developer.apple.com/news/releases/rss/releases.rss)
+  if want macos && has sw_vers; then
+    apple_report macOS "$(sw_vers -productVersion)"
+  fi
+  if want xcode && has xcodebuild; then
+    apple_report Xcode "$(xcodebuild -version 2>/dev/null | head -1 | first_version)" "$(xcode-select -p 2>/dev/null)"
+  fi
+}
 
-if want xcode && has xcodebuild; then
-  apple_report Xcode "$(xcodebuild -version 2>/dev/null | head -1 | first_version)" "$(xcode-select -p 2>/dev/null)"
-fi
-
-if want brew && has brew; then
+check_brew() {
+  want brew && has brew || return
   report Homebrew "$(brew --version 2>/dev/null | head -1 | first_version)" "$(github_latest Homebrew/brew)"
+  local outdated
   if outdated=$(brew outdated --quiet 2>/dev/null); then
     outdated=$(grep -c . <<<"$outdated")
     echo "  brew outdated: $outdated formulae/casks"
-    ROWS+=("| brew packages | $outdated outdated | | $([ "$outdated" -eq 0 ] && echo ✅ || echo ⚠️) \`brew upgrade\` |")
+    row "| brew packages | $outdated outdated | | $([ "$outdated" -eq 0 ] && echo ✅ || echo ⚠️) \`brew upgrade\` |"
   else
     echo "  brew outdated: unknown (command failed)"
-    ROWS+=("| brew packages | ? | | ❔ unknown |")
+    row "| brew packages | ? | | ❔ unknown |"
   fi
-fi
+}
 
-if want claude && has claude; then
+check_claude() {
+  want claude && has claude || return
+  local latest
   latest=$(fetch https://registry.npmjs.org/@anthropic-ai/claude-code/latest \
     | grep -oE '"version":"[^"]*"' | head -1 | first_version)
   report claude "$(claude --version 2>/dev/null | first_version)" "$latest"
-fi
+}
 
-if want tailscale; then
-  ts=tailscale
+check_tailscale() {
+  want tailscale || return
+  local ts=tailscale
   has tailscale || ts=/Applications/Tailscale.app/Contents/MacOS/Tailscale
   [ -x "$(command -v "$ts")" ] &&
     report tailscale "$("$ts" version 2>/dev/null | first_version)" "$(github_latest tailscale/tailscale)"
-fi
+}
 
-check cloudflared "cloudflared --version"   cloudflare/cloudflared
-check gh          "gh --version"            cli/cli
-
-if want runner && [ -x "$RUNNER_DIR/bin/Runner.Listener" ]; then
+check_runner() {
+  want runner && [ -x "$RUNNER_DIR/bin/Runner.Listener" ] || return
   report actions-runner "$("$RUNNER_DIR/bin/Runner.Listener" --version 2>/dev/null | first_version)" \
     "$(github_latest actions/runner)"
-fi
+}
 
-if want node && has node; then
+check_node() {
+  want node && has node || return
+  local have lts newest same_line
   have=$(node --version | first_version)
   lts=$(fetch https://nodejs.org/dist/index.json | grep '"lts":"')
   newest=$(head -1 <<<"$lts" | first_version)
@@ -189,15 +201,29 @@ if want node && has node; then
   else
     report node "$have" "$newest" "not an LTS line"
   fi
-fi
+}
 
-check xcodes      "xcodes version"          XcodesOrg/xcodes
-check swiftlint   "swiftlint version"       realm/SwiftLint
-check swiftformat "swiftformat --version"   nicklockwood/SwiftFormat
-check tuist       "tuist version"           tuist/tuist
-check pod         "pod --version"           CocoaPods/CocoaPods
-check fastlane    "fastlane --version | grep -E '^fastlane [0-9]'" fastlane/fastlane
+task check_apple
+task check_brew
+task check_claude
+task check_tailscale
+task check cloudflared "cloudflared --version"   cloudflare/cloudflared
+task check gh          "gh --version"            cli/cli
+task check_runner
+task check_node
+task check xcodes      "xcodes version"          XcodesOrg/xcodes
+task check swiftlint   "swiftlint version"       realm/SwiftLint
+task check swiftformat "swiftformat --version"   nicklockwood/SwiftFormat
+task check tuist       "tuist version"           tuist/tuist
+task check pod         "pod --version"           CocoaPods/CocoaPods
+task check fastlane    "fastlane --version | grep -E '^fastlane [0-9]'" fastlane/fastlane
+wait
 
+BEHIND=$(cat "$TMP"/*.status 2>/dev/null | grep -c behind)
+MAJOR_BEHIND=$(cat "$TMP"/*.status 2>/dev/null | grep -c 'major behind')
+
+echo "Runner versions:"
+cat "$TMP"/*.log 2>/dev/null
 echo "Runner versions: $BEHIND behind ($MAJOR_BEHIND major)"
 
 if [ -n "$GITHUB_STEP_SUMMARY" ]; then
@@ -205,7 +231,7 @@ if [ -n "$GITHUB_STEP_SUMMARY" ]; then
     echo "### Runner versions${RUNNER_NAME:+ · $RUNNER_NAME}"
     echo "| Tool | Installed | Latest | Status |"
     echo "|---|---|---|---|"
-    printf '%s\n' "${ROWS[@]}"
+    cat "$TMP"/*.row 2>/dev/null
   } >> "$GITHUB_STEP_SUMMARY" 2>/dev/null
 fi
 
