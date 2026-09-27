@@ -10,6 +10,7 @@
 #   macOS, Xcode   Apple Developer releases RSS
 #   claude         npm registry (@anthropic-ai/claude-code)
 #   node           nodejs.org release index (newest release on your LTS line)
+#   docker         GitHub moby/moby (the CLI shares the engine's version numbers)
 #   everything else  the GitHub repo's "latest release" redirect
 #
 # Environment overrides:
@@ -270,6 +271,8 @@ task check_claude
 task check_tailscale
 task check cloudflared "cloudflared --version"   cloudflare/cloudflared
 task check gh          "gh --version"            cli/cli
+task check docker      "docker --version"        moby/moby
+task check colima      "colima version"          abiosoft/colima
 task check_runner
 task check_node
 task check xcodes      "xcodes version"          XcodesOrg/xcodes

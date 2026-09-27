@@ -83,6 +83,8 @@ For the hook, set these in the runner's `.env` file alongside the hook line.
 | claude | `claude --version` | npm `@anthropic-ai/claude-code` |
 | tailscale | `tailscale version` (CLI or the app bundle) | GitHub `tailscale/tailscale` |
 | cloudflared, gh | `--version` | GitHub releases |
+| docker | `docker --version` (the CLI; Docker Desktop bundles one too) | GitHub `moby/moby`, whose release numbers the CLI shares |
+| colima | `colima version` | GitHub `abiosoft/colima` |
 | actions-runner | `Runner.Listener --version` | GitHub `actions/runner` |
 | node | `node --version` | nodejs.org (newest release on your LTS line) |
 | xcodes, swiftlint, swiftformat, tuist, pod, fastlane | their version commands | GitHub releases |
@@ -105,10 +107,11 @@ Runner versions:
   tailscale      1.102.4        latest 1.102.4        current
   cloudflared    2026.5.1       latest 2026.9.3       behind 122 days (~4 mo)
   gh             2.92.0         latest 2.101.0        behind 140 days (~4 mo)
+  docker         29.8.0         latest 29.8.1         behind 12 days
   node           22.23.1        latest 22.23.3        behind 93 days (~3 mo) (newest LTS 24.21.0)
   swiftlint      0.63.3         latest 0.65.1         behind 86 days (~2 mo)
   pod            1.13.0         latest 1.17.0         behind 1018 days (~2.7 yr)
-Runner versions: 6 behind (0 major)
+Runner versions: 7 behind (0 major)
 ```
 
 Step summary:
@@ -124,6 +127,7 @@ Step summary:
 > | tailscale | 1.102.4 | 1.102.4 |  | ✅ current |
 > | cloudflared | 2026.5.1 | 2026.9.3 | 122 days (~4 mo) | ⚠️ behind |
 > | gh | 2.92.0 | 2.101.0 | 140 days (~4 mo) | ⚠️ behind |
+> | docker | 29.8.0 | 29.8.1 | 12 days | ⚠️ behind |
 > | node | 22.23.1 | 22.23.3 | 93 days (~3 mo) | ⚠️ behind · newest LTS 24.21.0 |
 > | swiftlint | 0.63.3 | 0.65.1 | 86 days (~2 mo) | ⚠️ behind |
 > | pod | 1.13.0 | 1.17.0 | 1018 days (~2.7 yr) | ⚠️ behind |
@@ -168,7 +172,7 @@ Run it by hand on any Mac with `bash versions/versions.sh`.
 | Variable | Default | Purpose |
 |---|---|---|
 | `RUNNER_VERSIONS_WARN` | `major` | Emit `::warning::` for `major`, `any` staleness, or `none` |
-| `RUNNER_VERSIONS_SKIP` | empty | Space-separated tool names to skip (`macos xcode brew claude tailscale cloudflared gh runner node xcodes swiftlint swiftformat tuist pod fastlane`) |
+| `RUNNER_VERSIONS_SKIP` | empty | Space-separated tool names to skip (`macos xcode brew claude tailscale cloudflared gh docker colima runner node xcodes swiftlint swiftformat tuist pod fastlane`) |
 | `RUNNER_VERSIONS_RUNNER_DIR` | derived from `RUNNER_WORKSPACE`, else `~/actions-runner` | Actions runner install dir |
 | `RUNNER_VERSIONS_TIMEOUT` | `10` | Per-request timeout in seconds |
 
