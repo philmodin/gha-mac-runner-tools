@@ -172,8 +172,8 @@ Run it by hand on any Mac with `bash versions/versions.sh`.
 | `RUNNER_VERSIONS_RUNNER_DIR` | derived from `RUNNER_WORKSPACE`, else `~/actions-runner` | Actions runner install dir |
 | `RUNNER_VERSIONS_TIMEOUT` | `10` | Per-request timeout in seconds |
 
-To track another tool whose releases are on GitHub, add a `check` line near the bottom of `versions.sh`:
+To track another tool whose releases are on GitHub, add a `task check` line with the others near the bottom of `versions.sh` (before the `wait`); it runs in parallel with the other checks:
 
 ```sh
-check mytool "mytool --version" owner/repo
+task check mytool "mytool --version" owner/repo
 ```
