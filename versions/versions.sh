@@ -125,31 +125,37 @@ if want macos || want xcode; then
   APPLE_RSS=$(fetch https://developer.apple.com/news/releases/rss/releases.rss)
 fi
 
-if want macos && has sw_vers; then
-  have=$(sw_vers -productVersion)
-  releases=$(apple_releases macOS)
+# apple_report NAME INSTALLED [NOTE] — compares with the newest release on the
+# installed major, since major upgrades are often held back on purpose.
+apple_report() {
+  local releases newest same note=$3
+  releases=$(apple_releases "$1")
   newest=$(max_version <<<"$releases")
-  same_major=$(grep -E "^${have%%.*}(\.|$)" <<<"$releases" | max_version)
-  if [ -n "$same_major" ] && [ "$(ver_cmp "$have" "$same_major")" -lt 0 ]; then
-    # Missing updates on the installed major are what matter most.
-    report macOS "$have" "$same_major" "newest overall ${newest:-?}"
-  elif [ -n "$newest" ] && [ "${newest%%.*}" != "${have%%.*}" ]; then
-    report macOS "$have" "$newest" "patched on current major"
-  else
-    report macOS "$have" "$newest"
+  same=$(grep -E "^${2%%.*}(\.|$)" <<<"$releases" | max_version)
+  if [ -n "$newest" ] && [ "${newest%%.*}" != "${2%%.*}" ]; then
+    note="$newest available${note:+; $note}"
   fi
+  report "$1" "$2" "$same" "$note"
+}
+
+if want macos && has sw_vers; then
+  apple_report macOS "$(sw_vers -productVersion)"
 fi
 
 if want xcode && has xcodebuild; then
-  have=$(xcodebuild -version 2>/dev/null | head -1 | first_version)
-  report Xcode "$have" "$(apple_releases Xcode | max_version)" "$(xcode-select -p 2>/dev/null)"
+  apple_report Xcode "$(xcodebuild -version 2>/dev/null | head -1 | first_version)" "$(xcode-select -p 2>/dev/null)"
 fi
 
 if want brew && has brew; then
   report Homebrew "$(brew --version 2>/dev/null | head -1 | first_version)" "$(github_latest Homebrew/brew)"
-  outdated=$(brew outdated --quiet 2>/dev/null | grep -c .)
-  echo "  brew outdated: $outdated formulae/casks"
-  ROWS+=("| brew packages | $outdated outdated | | $([ "$outdated" -eq 0 ] && echo ✅ || echo ⚠️) \`brew upgrade\` |")
+  if outdated=$(brew outdated --quiet 2>/dev/null); then
+    outdated=$(grep -c . <<<"$outdated")
+    echo "  brew outdated: $outdated formulae/casks"
+    ROWS+=("| brew packages | $outdated outdated | | $([ "$outdated" -eq 0 ] && echo ✅ || echo ⚠️) \`brew upgrade\` |")
+  else
+    echo "  brew outdated: unknown (command failed)"
+    ROWS+=("| brew packages | ? | | ❔ unknown |")
+  fi
 fi
 
 if want claude && has claude; then
