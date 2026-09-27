@@ -1,0 +1,213 @@
+#!/bin/bash
+# Report installed versions of macOS, Xcode, and common dev tools on a
+# self-hosted Mac, and how stale each one is against the newest release.
+#
+# Works as a normal workflow step via the composite action in this directory,
+# or run by hand / from launchd. Tools that aren't installed are skipped.
+# Always exits 0 so it never fails a job; staleness is reported as warnings.
+#
+# Latest versions come from public, unauthenticated sources:
+#   macOS, Xcode   Apple Developer releases RSS
+#   claude         npm registry (@anthropic-ai/claude-code)
+#   node           nodejs.org release index (newest release on your LTS line)
+#   everything else  the GitHub repo's "latest release" redirect
+#
+# Environment overrides:
+#   RUNNER_VERSIONS_WARN        when to emit ::warning:: lines:
+#                               major (default) | any | none
+#   RUNNER_VERSIONS_SKIP        space-separated tool names to skip, e.g. "node gh"
+#   RUNNER_VERSIONS_RUNNER_DIR  actions runner install dir (default: derived
+#                               from RUNNER_WORKSPACE, else ~/actions-runner)
+#   RUNNER_VERSIONS_TIMEOUT     per-request timeout in seconds (default 10)
+
+WARN_ON="${RUNNER_VERSIONS_WARN:-major}"
+SKIP=" ${RUNNER_VERSIONS_SKIP:-} "
+TIMEOUT="${RUNNER_VERSIONS_TIMEOUT:-10}"
+
+if [ -n "$RUNNER_VERSIONS_RUNNER_DIR" ]; then
+  RUNNER_DIR="$RUNNER_VERSIONS_RUNNER_DIR"
+elif [ -n "$RUNNER_WORKSPACE" ]; then
+  RUNNER_DIR="$(dirname "$(dirname "$RUNNER_WORKSPACE")")"
+else
+  RUNNER_DIR="$HOME/actions-runner"
+fi
+
+# Runner services and launchd jobs start with a minimal PATH.
+export PATH="$PATH:/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$HOME/.claude/local"
+export HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_ENV_HINTS=1
+
+fetch() { curl -fsSL --connect-timeout 5 --max-time "$TIMEOUT" "$@" 2>/dev/null; }
+
+# First dotted version number in the input, without a leading "v".
+first_version() { grep -oE '[0-9]+(\.[0-9]+)+' | head -1; }
+
+# Tag of a GitHub repo's latest (non-prerelease) release, via the web redirect,
+# which needs no API token and isn't subject to API rate limits.
+github_latest() {
+  fetch -o /dev/null -w '%{url_effective}' "https://github.com/$1/releases/latest" \
+    | sed -n 's|.*/releases/tag/||p' | first_version
+}
+
+# Compare dotted versions: prints -1, 0, or 1.
+ver_cmp() {
+  local -a a b
+  local i x y
+  IFS=. read -ra a <<<"$1"
+  IFS=. read -ra b <<<"$2"
+  for ((i = 0; i < ${#a[@]} || i < ${#b[@]}; i++)); do
+    x=$((10#${a[i]:-0})) y=$((10#${b[i]:-0}))
+    if ((x < y)); then echo -1; return; fi
+    if ((x > y)); then echo 1; return; fi
+  done
+  echo 0
+}
+
+# Highest version among lines of input.
+max_version() {
+  local v best=
+  while read -r v; do
+    [ -z "$v" ] && continue
+    if [ -z "$best" ] || [ "$(ver_cmp "$v" "$best")" = 1 ]; then best=$v; fi
+  done
+  echo "$best"
+}
+
+# Final (non-beta, non-RC) releases in Apple's feed, e.g. "macOS 26.6.2 (25G83)"
+# or "Xcode 27 (27A266a)". Reads APPLE_RSS, fetched once below.
+apple_releases() {
+  printf '%s\n' "$APPLE_RSS" \
+    | grep -oE "<title>$1 ([A-Za-z]+ )?[0-9]+(\.[0-9]+)* \([0-9A-Za-z]+\)</title>" \
+    | sed -E 's/^<title>[^0-9]*([0-9.]+).*/\1/'
+}
+
+ROWS=()
+BEHIND=0
+MAJOR_BEHIND=0
+
+# report NAME INSTALLED LATEST [NOTE]
+report() {
+  local name=$1 have=$2 latest=$3 note=$4 status icon
+  if [ -z "$have" ]; then
+    return
+  elif [ -z "$latest" ]; then
+    status="unknown"; icon="❔"
+  elif [ "$(ver_cmp "$have" "$latest")" -ge 0 ]; then
+    status="current"; icon="✅"
+  elif [ "${have%%.*}" != "${latest%%.*}" ]; then
+    status="major behind"; icon="❌"
+    BEHIND=$((BEHIND + 1)); MAJOR_BEHIND=$((MAJOR_BEHIND + 1))
+  else
+    status="behind"; icon="⚠️"
+    BEHIND=$((BEHIND + 1))
+  fi
+
+  echo "  $(printf '%-14s %-14s latest %-14s %s' "$name" "$have" "${latest:-?}" "$status")${note:+ ($note)}"
+  ROWS+=("| $name | $have | ${latest:-?} | $icon $status${note:+ · $note} |")
+
+  if { [ "$status" = "major behind" ] && [ "$WARN_ON" != none ]; } ||
+     { [ "$status" = "behind" ] && [ "$WARN_ON" = any ]; }; then
+    echo "::warning::$name is $status: $have installed, $latest available"
+  fi
+}
+
+want() { [[ "$SKIP" != *" $1 "* ]]; }
+has() { command -v "$1" >/dev/null 2>&1; }
+
+# check NAME COMMAND GITHUB_REPO — for tools whose newest release is on GitHub.
+check() {
+  want "$1" && has "${2%% *}" || return
+  report "$1" "$(eval "$2" 2>/dev/null | first_version)" "$(github_latest "$3")"
+}
+
+echo "Runner versions:"
+
+if want macos || want xcode; then
+  APPLE_RSS=$(fetch https://developer.apple.com/news/releases/rss/releases.rss)
+fi
+
+if want macos && has sw_vers; then
+  have=$(sw_vers -productVersion)
+  releases=$(apple_releases macOS)
+  newest=$(max_version <<<"$releases")
+  same_major=$(grep -E "^${have%%.*}(\.|$)" <<<"$releases" | max_version)
+  if [ -n "$same_major" ] && [ "$(ver_cmp "$have" "$same_major")" -lt 0 ]; then
+    # Missing updates on the installed major are what matter most.
+    report macOS "$have" "$same_major" "newest overall ${newest:-?}"
+  elif [ -n "$newest" ] && [ "${newest%%.*}" != "${have%%.*}" ]; then
+    report macOS "$have" "$newest" "patched on current major"
+  else
+    report macOS "$have" "$newest"
+  fi
+fi
+
+if want xcode && has xcodebuild; then
+  have=$(xcodebuild -version 2>/dev/null | head -1 | first_version)
+  report Xcode "$have" "$(apple_releases Xcode | max_version)" "$(xcode-select -p 2>/dev/null)"
+fi
+
+if want brew && has brew; then
+  report Homebrew "$(brew --version 2>/dev/null | head -1 | first_version)" "$(github_latest Homebrew/brew)"
+  outdated=$(brew outdated --quiet 2>/dev/null | grep -c .)
+  echo "  brew outdated: $outdated formulae/casks"
+  ROWS+=("| brew packages | $outdated outdated | | $([ "$outdated" -eq 0 ] && echo ✅ || echo ⚠️) \`brew upgrade\` |")
+fi
+
+if want claude && has claude; then
+  latest=$(fetch https://registry.npmjs.org/@anthropic-ai/claude-code/latest \
+    | grep -oE '"version":"[^"]*"' | head -1 | first_version)
+  report claude "$(claude --version 2>/dev/null | first_version)" "$latest"
+fi
+
+if want tailscale; then
+  ts=tailscale
+  has tailscale || ts=/Applications/Tailscale.app/Contents/MacOS/Tailscale
+  [ -x "$(command -v "$ts")" ] &&
+    report tailscale "$("$ts" version 2>/dev/null | first_version)" "$(github_latest tailscale/tailscale)"
+fi
+
+check cloudflared "cloudflared --version"   cloudflare/cloudflared
+check gh          "gh --version"            cli/cli
+
+if want runner && [ -x "$RUNNER_DIR/bin/Runner.Listener" ]; then
+  report actions-runner "$("$RUNNER_DIR/bin/Runner.Listener" --version 2>/dev/null | first_version)" \
+    "$(github_latest actions/runner)"
+fi
+
+if want node && has node; then
+  have=$(node --version | first_version)
+  lts=$(fetch https://nodejs.org/dist/index.json | grep '"lts":"')
+  newest=$(head -1 <<<"$lts" | first_version)
+  same_line=$(grep -m1 "\"version\":\"v${have%%.*}\." <<<"$lts" | first_version)
+  if [ -n "$same_line" ]; then
+    report node "$have" "$same_line" "newest LTS ${newest:-?}"
+  else
+    report node "$have" "$newest" "not an LTS line"
+  fi
+fi
+
+check xcodes      "xcodes version"          XcodesOrg/xcodes
+check swiftlint   "swiftlint version"       realm/SwiftLint
+check swiftformat "swiftformat --version"   nicklockwood/SwiftFormat
+check tuist       "tuist version"           tuist/tuist
+check pod         "pod --version"           CocoaPods/CocoaPods
+check fastlane    "fastlane --version | grep -E '^fastlane [0-9]'" fastlane/fastlane
+
+echo "Runner versions: $BEHIND behind ($MAJOR_BEHIND major)"
+
+if [ -n "$GITHUB_STEP_SUMMARY" ]; then
+  {
+    echo "### Runner versions${RUNNER_NAME:+ · $RUNNER_NAME}"
+    echo "| Tool | Installed | Latest | Status |"
+    echo "|---|---|---|---|"
+    printf '%s\n' "${ROWS[@]}"
+  } >> "$GITHUB_STEP_SUMMARY" 2>/dev/null
+fi
+
+if [ -n "$GITHUB_OUTPUT" ]; then
+  {
+    echo "behind=$BEHIND"
+    echo "major-behind=$MAJOR_BEHIND"
+  } >> "$GITHUB_OUTPUT" 2>/dev/null
+fi
+
+exit 0
