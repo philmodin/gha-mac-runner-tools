@@ -43,9 +43,55 @@ first_version() { grep -oE '[0-9]+(\.[0-9]+)+' | head -1; }
 
 # Tag of a GitHub repo's latest (non-prerelease) release, via the web redirect,
 # which needs no API token and isn't subject to API rate limits.
-github_latest() {
+github_tag() {
   fetch -o /dev/null -w '%{url_effective}' "https://github.com/$1/releases/latest" \
-    | sed -n 's|.*/releases/tag/||p' | first_version
+    | sed -n 's|.*/releases/tag/||p'
+}
+
+# Release dates (YYYY-MM-DD or "24 Sep 2026") by source; the version is the last arg.
+# github_date REPO TAG_PREFIX VERSION, e.g. github_date cli/cli v 2.92.0
+github_date() {
+  fetch "https://github.com/$1/releases/tag/$2$3" \
+    | grep -oE 'datetime="[0-9]{4}-[0-9]{2}-[0-9]{2}' | head -1 | cut -d'"' -f2
+}
+# npm_date FILE VERSION — FILE holds the package's full registry document.
+npm_date() {
+  grep -oE '"[0-9.]+":"[0-9]{4}-[0-9]{2}-[0-9]{2}' "$1" | grep -F "\"$2\":" | head -1 | cut -d'"' -f4
+}
+# node_date FILE VERSION — FILE holds nodejs.org/dist/index.json.
+node_date() {
+  grep -F "\"version\":\"v$2\"" "$1" | grep -oE '"date":"[0-9-]{10}' | head -1 | cut -d'"' -f4
+}
+# apple_date NAME VERSION — pubDate of that release in APPLE_RSS, if still listed.
+apple_date() {
+  printf '%s\n' "$APPLE_RSS" | grep -oE '<title>[^<]*</title>|<pubDate>[^<]*' \
+    | grep -A1 -E "^<title>$1 ([A-Za-z]+ )?$2 \(" | grep -oE '[0-9]{1,2} [A-Z][a-z]{2} [0-9]{4}' | head -1
+}
+
+epoch() {
+  LC_ALL=C date -j -u -f %Y-%m-%d "$1" +%s 2>/dev/null ||
+    LC_ALL=C date -j -u -f '%d %b %Y' "$1" +%s 2>/dev/null ||
+    LC_ALL=C date -u -d "$1" +%s 2>/dev/null
+}
+
+# Whole days from date A to date B; prints nothing if either is missing or B < A.
+days_between() {
+  local a b
+  a=$(epoch "$1") && b=$(epoch "$2") && [ -n "$a" ] && [ -n "$b" ] && ((b >= a)) || return
+  echo $(((b - a + 43200) / 86400))
+}
+
+# 5 → "5 days", 143 → "143 days (~4 mo)", 450 → "450 days (~1.2 yr)"
+fmt_days() {
+  local n=$1 t
+  if ((n < 60)); then
+    echo "$n day$([ "$n" = 1 ] || echo s)"
+  elif ((n < 365)); then
+    echo "$n days (~$((n / 30)) mo)"
+  else
+    t=$((n * 10 / 365))
+    echo "$n days (~$((t / 10)).$((t % 10)) yr)"
+  fi
 }
 
 # Compare dotted versions: prints -1, 0, or 1.
@@ -95,9 +141,11 @@ task() {
 
 row() { echo "$1" >>"$TASK.row"; }
 
-# report NAME INSTALLED LATEST [NOTE]
+# report NAME INSTALLED LATEST [NOTE [DATE_CMD...]]
+# DATE_CMD, run with a version appended, prints its release date; used only when behind.
 report() {
-  local name=$1 have=$2 latest=$3 note=$4 status icon
+  local name=$1 have=$2 latest=$3 note=$4 status icon days= age=
+  shift $(($# < 4 ? $# : 4))
   if [ -z "$have" ]; then
     return
   elif [ -z "$latest" ]; then
@@ -110,14 +158,27 @@ report() {
     status="behind"; icon="⚠️"
   fi
 
-  echo "  $(printf '%-14s %-14s latest %-14s %s' "$name" "$have" "${latest:-?}" "$status")${note:+ ($note)}"
-  row "| $name | $have | ${latest:-?} | $icon $status${note:+ · $note} |"
+  if [[ "$status" = *behind ]] && [ $# -gt 0 ]; then
+    days=$(days_between "$("$@" "$have")" "$("$@" "$latest")")
+    age=${days:+$(fmt_days "$days")}
+  fi
+
+  echo "  $(printf '%-14s %-14s latest %-14s %s' "$name" "$have" "${latest:-?}" "$status${age:+ $age}")${note:+ ($note)}"
+  row "| $name | $have | ${latest:-?} | $age | $icon $status${note:+ · $note} |"
   echo "$status" >>"$TASK.status"
 
   if { [ "$status" = "major behind" ] && [ "$WARN_ON" != none ]; } ||
      { [ "$status" = "behind" ] && [ "$WARN_ON" = any ]; }; then
-    echo "::warning::$name is $status: $have installed, $latest available"
+    echo "::warning::$name is $status: $have installed, $latest available${days:+, released $days days later}"
   fi
+}
+
+# gh_report NAME INSTALLED GITHUB_REPO [NOTE]
+gh_report() {
+  local tag latest
+  tag=$(github_tag "$3")
+  latest=$(first_version <<<"$tag")
+  report "$1" "$2" "$latest" "$4" github_date "$3" "${tag%%"$latest"*}"
 }
 
 want() { [[ "$SKIP" != *" $1 "* ]]; }
@@ -126,7 +187,7 @@ has() { command -v "$1" >/dev/null 2>&1; }
 # check NAME COMMAND GITHUB_REPO — for tools whose newest release is on GitHub.
 check() {
   want "$1" && has "${2%% *}" || return
-  report "$1" "$(eval "$2" 2>/dev/null | first_version)" "$(github_latest "$3")"
+  gh_report "$1" "$(eval "$2" 2>/dev/null | first_version)" "$3"
 }
 
 # apple_report NAME INSTALLED [NOTE] — compares with the newest release on the
@@ -139,7 +200,7 @@ apple_report() {
   if [ -n "$newest" ] && [ "${newest%%.*}" != "${2%%.*}" ]; then
     note="$newest available${note:+; $note}"
   fi
-  report "$1" "$2" "$same" "$note"
+  report "$1" "$2" "$same" "$note" apple_date "$1"
 }
 
 check_apple() {
@@ -155,24 +216,24 @@ check_apple() {
 
 check_brew() {
   want brew && has brew || return
-  report Homebrew "$(brew --version 2>/dev/null | head -1 | first_version)" "$(github_latest Homebrew/brew)"
+  gh_report Homebrew "$(brew --version 2>/dev/null | head -1 | first_version)" Homebrew/brew
   local outdated
   if outdated=$(brew outdated --quiet 2>/dev/null); then
     outdated=$(grep -c . <<<"$outdated")
     echo "  brew outdated: $outdated formulae/casks"
-    row "| brew packages | $outdated outdated | | $([ "$outdated" -eq 0 ] && echo ✅ || echo ⚠️) \`brew upgrade\` |"
+    row "| brew packages | $outdated outdated | | | $([ "$outdated" -eq 0 ] && echo ✅ || echo ⚠️) \`brew upgrade\` |"
   else
     echo "  brew outdated: unknown (command failed)"
-    row "| brew packages | ? | | ❔ unknown |"
+    row "| brew packages | ? | | | ❔ unknown |"
   fi
 }
 
 check_claude() {
   want claude && has claude || return
   local latest
-  latest=$(fetch https://registry.npmjs.org/@anthropic-ai/claude-code/latest \
-    | grep -oE '"version":"[^"]*"' | head -1 | first_version)
-  report claude "$(claude --version 2>/dev/null | first_version)" "$latest"
+  fetch https://registry.npmjs.org/@anthropic-ai/claude-code >"$TASK.npm"
+  latest=$(grep -oE '"dist-tags":\{[^}]*' "$TASK.npm" | grep -oE '"latest":"[^"]*"' | first_version)
+  report claude "$(claude --version 2>/dev/null | first_version)" "$latest" "" npm_date "$TASK.npm"
 }
 
 check_tailscale() {
@@ -180,26 +241,26 @@ check_tailscale() {
   local ts=tailscale
   has tailscale || ts=/Applications/Tailscale.app/Contents/MacOS/Tailscale
   [ -x "$(command -v "$ts")" ] &&
-    report tailscale "$("$ts" version 2>/dev/null | first_version)" "$(github_latest tailscale/tailscale)"
+    gh_report tailscale "$("$ts" version 2>/dev/null | first_version)" tailscale/tailscale
 }
 
 check_runner() {
   want runner && [ -x "$RUNNER_DIR/bin/Runner.Listener" ] || return
-  report actions-runner "$("$RUNNER_DIR/bin/Runner.Listener" --version 2>/dev/null | first_version)" \
-    "$(github_latest actions/runner)"
+  gh_report actions-runner "$("$RUNNER_DIR/bin/Runner.Listener" --version 2>/dev/null | first_version)" actions/runner
 }
 
 check_node() {
   want node && has node || return
   local have lts newest same_line
   have=$(node --version | first_version)
-  lts=$(fetch https://nodejs.org/dist/index.json | grep '"lts":"')
+  fetch https://nodejs.org/dist/index.json >"$TASK.node"
+  lts=$(grep '"lts":"' "$TASK.node")
   newest=$(head -1 <<<"$lts" | first_version)
   same_line=$(grep -m1 "\"version\":\"v${have%%.*}\." <<<"$lts" | first_version)
   if [ -n "$same_line" ]; then
-    report node "$have" "$same_line" "newest LTS ${newest:-?}"
+    report node "$have" "$same_line" "newest LTS ${newest:-?}" node_date "$TASK.node"
   else
-    report node "$have" "$newest" "not an LTS line"
+    report node "$have" "$newest" "not an LTS line" node_date "$TASK.node"
   fi
 }
 
@@ -229,8 +290,8 @@ echo "Runner versions: $BEHIND behind ($MAJOR_BEHIND major)"
 if [ -n "$GITHUB_STEP_SUMMARY" ]; then
   {
     echo "### Runner versions${RUNNER_NAME:+ · $RUNNER_NAME}"
-    echo "| Tool | Installed | Latest | Status |"
-    echo "|---|---|---|---|"
+    echo "| Tool | Installed | Latest | Behind by | Status |"
+    echo "|---|---|---|---|---|"
     cat "$TMP"/*.row 2>/dev/null
   } >> "$GITHUB_STEP_SUMMARY" 2>/dev/null
 fi

@@ -87,7 +87,7 @@ For the hook, set these in the runner's `.env` file alongside the hook line.
 | node | `node --version` | nodejs.org (newest release on your LTS line) |
 | xcodes, swiftlint, swiftformat, tuist, pod, fastlane | their version commands | GitHub releases |
 
-Each row is ✅ current, ⚠️ behind (same major), ❌ major behind, or ❔ unknown (the newest version couldn't be fetched). macOS and Xcode are compared within their installed major, since major upgrades are often held back on purpose; a newer major shows as a note and doesn't count toward `major-behind`. Output goes to the log, the step summary table, and the `behind` / `major-behind` step outputs. Like the health script, it always exits 0.
+Each row is ✅ current, ⚠️ behind (same major), ❌ major behind, or ❔ unknown (the newest version couldn't be fetched). macOS and Xcode are compared within their installed major, since major upgrades are often held back on purpose; a newer major shows as a note and doesn't count toward `major-behind`. When a tool is behind, "Behind by" shows how many days separate the installed version's release from the newest one, e.g. `140 days (~4 mo)`; it's blank if either release date can't be found (Apple's feed only lists recent releases). Release dates come from the same sources, plus the GitHub release page for each tag, and are looked up only for tools that are behind. Output goes to the log, the step summary table, and the `behind` / `major-behind` step outputs. Like the health script, it always exits 0.
 
 Newest versions come from public endpoints with no token needed. The `brew outdated` count uses Homebrew's cached metadata and doesn't run `brew update` first. This makes network calls, so it's a poor fit for a job hook; run it on a schedule instead.
 
@@ -101,32 +101,32 @@ Runner versions:
   Xcode          26.6           latest 26.6           current (27 available; /Applications/Xcode.app/Contents/Developer)
   Homebrew       7.0.6          latest 7.0.6          current
   brew outdated: 72 formulae/casks
-  claude         2.1.250        latest 2.1.283        behind
+  claude         2.1.250        latest 2.1.283        behind 29 days
   tailscale      1.102.4        latest 1.102.4        current
-  cloudflared    2026.5.1       latest 2026.9.3       behind
-  gh             2.92.0         latest 2.101.0        behind
-  node           22.23.1        latest 22.23.3        behind (newest LTS 24.21.0)
-  swiftlint      0.63.3         latest 0.65.1         behind
-  pod            1.13.0         latest 1.17.0         behind
+  cloudflared    2026.5.1       latest 2026.9.3       behind 122 days (~4 mo)
+  gh             2.92.0         latest 2.101.0        behind 140 days (~4 mo)
+  node           22.23.1        latest 22.23.3        behind 93 days (~3 mo) (newest LTS 24.21.0)
+  swiftlint      0.63.3         latest 0.65.1         behind 86 days (~2 mo)
+  pod            1.13.0         latest 1.17.0         behind 1018 days (~2.7 yr)
 Runner versions: 6 behind (0 major)
 ```
 
 Step summary:
 
 > ### Runner versions · mac-mini-1
-> | Tool | Installed | Latest | Status |
-> |---|---|---|---|
-> | macOS | 26.7 | 26.6.2 | ✅ current · 27.0 available |
-> | Xcode | 26.6 | 26.6 | ✅ current · 27 available; /Applications/Xcode.app/Contents/Developer |
-> | Homebrew | 7.0.6 | 7.0.6 | ✅ current |
-> | brew packages | 72 outdated | | ⚠️ `brew upgrade` |
-> | claude | 2.1.250 | 2.1.283 | ⚠️ behind |
-> | tailscale | 1.102.4 | 1.102.4 | ✅ current |
-> | cloudflared | 2026.5.1 | 2026.9.3 | ⚠️ behind |
-> | gh | 2.92.0 | 2.101.0 | ⚠️ behind |
-> | node | 22.23.1 | 22.23.3 | ⚠️ behind · newest LTS 24.21.0 |
-> | swiftlint | 0.63.3 | 0.65.1 | ⚠️ behind |
-> | pod | 1.13.0 | 1.17.0 | ⚠️ behind |
+> | Tool | Installed | Latest | Behind by | Status |
+> |---|---|---|---|---|
+> | macOS | 26.7 | 26.6.2 |  | ✅ current · 27.0 available |
+> | Xcode | 26.6 | 26.6 |  | ✅ current · 27 available; /Applications/Xcode.app/Contents/Developer |
+> | Homebrew | 7.0.6 | 7.0.6 |  | ✅ current |
+> | brew packages | 72 outdated | | | ⚠️ `brew upgrade` |
+> | claude | 2.1.250 | 2.1.283 | 29 days | ⚠️ behind |
+> | tailscale | 1.102.4 | 1.102.4 |  | ✅ current |
+> | cloudflared | 2026.5.1 | 2026.9.3 | 122 days (~4 mo) | ⚠️ behind |
+> | gh | 2.92.0 | 2.101.0 | 140 days (~4 mo) | ⚠️ behind |
+> | node | 22.23.1 | 22.23.3 | 93 days (~3 mo) | ⚠️ behind · newest LTS 24.21.0 |
+> | swiftlint | 0.63.3 | 0.65.1 | 86 days (~2 mo) | ⚠️ behind |
+> | pod | 1.13.0 | 1.17.0 | 1018 days (~2.7 yr) | ⚠️ behind |
 
 macOS can show an installed version newer than "Latest" when Apple's feed hasn't listed the newest update yet; that still counts as current.
 
