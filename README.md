@@ -43,6 +43,25 @@ The output appears in each job's log under the "Complete runner" step. The step 
 
 If this repo is private, allow other repos to use it under Settings → Actions → General → Access.
 
+## Example report
+
+Job log:
+
+```
+Runner health: disk 195GB free | mem 83% free | swap 0.00M | _work 14G | DerivedData 1.9G
+```
+
+Step summary:
+
+> ### Runner health
+> | Metric | Value |
+> |---|---|
+> | Disk free | 195 GB |
+> | Memory free | 83% |
+> | Swap used | 0.00M |
+> | _work dir | 14G |
+> | DerivedData | 1.9G |
+
 ## Configuration
 
 | Variable | Default | Purpose |
@@ -71,6 +90,45 @@ For the hook, set these in the runner's `.env` file alongside the hook line.
 Each row is ✅ current, ⚠️ behind (same major), ❌ major behind, or ❔ unknown (the newest version couldn't be fetched). macOS and Xcode are compared within their installed major, since major upgrades are often held back on purpose; a newer major shows as a note and doesn't count toward `major-behind`. Output goes to the log, the step summary table, and the `behind` / `major-behind` step outputs. Like the health script, it always exits 0.
 
 Newest versions come from public endpoints with no token needed. The `brew outdated` count uses Homebrew's cached metadata and doesn't run `brew update` first. This makes network calls, so it's a poor fit for a job hook; run it on a schedule instead.
+
+## Example report
+
+Job log (with `warn: any`, each ⚠️ row would also emit a `::warning::` line):
+
+```
+Runner versions:
+  macOS          26.7           latest 26.6.2         current (27.0 available)
+  Xcode          26.6           latest 26.6           current (27 available; /Applications/Xcode.app/Contents/Developer)
+  Homebrew       7.0.6          latest 7.0.6          current
+  brew outdated: 72 formulae/casks
+  claude         2.1.250        latest 2.1.283        behind
+  tailscale      1.102.4        latest 1.102.4        current
+  cloudflared    2026.5.1       latest 2026.9.3       behind
+  gh             2.92.0         latest 2.101.0        behind
+  node           22.23.1        latest 22.23.3        behind (newest LTS 24.21.0)
+  swiftlint      0.63.3         latest 0.65.1         behind
+  pod            1.13.0         latest 1.17.0         behind
+Runner versions: 6 behind (0 major)
+```
+
+Step summary:
+
+> ### Runner versions · mac-mini-1
+> | Tool | Installed | Latest | Status |
+> |---|---|---|---|
+> | macOS | 26.7 | 26.6.2 | ✅ current · 27.0 available |
+> | Xcode | 26.6 | 26.6 | ✅ current · 27 available; /Applications/Xcode.app/Contents/Developer |
+> | Homebrew | 7.0.6 | 7.0.6 | ✅ current |
+> | brew packages | 72 outdated | | ⚠️ `brew upgrade` |
+> | claude | 2.1.250 | 2.1.283 | ⚠️ behind |
+> | tailscale | 1.102.4 | 1.102.4 | ✅ current |
+> | cloudflared | 2026.5.1 | 2026.9.3 | ⚠️ behind |
+> | gh | 2.92.0 | 2.101.0 | ⚠️ behind |
+> | node | 22.23.1 | 22.23.3 | ⚠️ behind · newest LTS 24.21.0 |
+> | swiftlint | 0.63.3 | 0.65.1 | ⚠️ behind |
+> | pod | 1.13.0 | 1.17.0 | ⚠️ behind |
+
+macOS can show an installed version newer than "Latest" when Apple's feed hasn't listed the newest update yet; that still counts as current.
 
 ## Scheduled report across your Macs
 
